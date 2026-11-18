@@ -1,0 +1,36 @@
+name: YouTube Trending Fetch
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # 每30分钟( GitHub 高负载时可能延迟5-30分钟, 属正常 )
+  workflow_dispatch:          # 支持在 Actions 页面手动立即运行
+
+permissions:
+  contents: write
+
+concurrency:
+  group: youtube-trending
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch YouTube trending
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_REGION: ${{ vars.YOUTUBE_REGION || 'US' }}
+        run: node scripts/fetch_youtube.mjs
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/youtube.json
+          git diff --cached --quiet || (git commit -m "chore: update youtube trending $(date -u +%FT%TZ)" && git push)
