@@ -88,22 +88,29 @@ async function downloadTrack(track, visitor) {
   if (!segments.length) throw new Error('字幕内容为空');
   return segments;
 }
-async function androidTranscript(id) {
+async function mobileTranscript(id, useIos = false) {
   const visitor = await visitorData(id);
+  console.log('visitorData', id, visitor.length);
+  const version = useIos ? '20.10.3' : ANDROID_VERSION;
+  const userAgent = useIos
+    ? `com.google.ios.youtube/${version} (iPhone16,2; U; CPU iOS 26.0 like Mac OS X)`
+    : ANDROID_UA;
   const client = {
-    clientName: 'ANDROID', clientVersion: ANDROID_VERSION, androidSdkVersion: 34,
-    hl: 'en', gl: 'US', userAgent: ANDROID_UA, visitorData: visitor,
+    clientName: useIos ? 'IOS' : 'ANDROID', clientVersion: version,
+    hl: 'en', gl: 'US', userAgent, visitorData: visitor,
   };
+  if (!useIos) client.androidSdkVersion = 34;
+  else { client.deviceMake = 'Apple'; client.deviceModel = 'iPhone16,2'; client.osName = 'iPhone OS'; client.osVersion = '26.0'; }
   const player = await apiPost('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     context: { client }, videoId: id,
   }, {
-    'User-Agent': ANDROID_UA,
-    'X-YouTube-Client-Name': '3',
-    'X-YouTube-Client-Version': ANDROID_VERSION,
+    'User-Agent': userAgent,
+    'X-YouTube-Client-Name': useIos ? '5' : '3',
+    'X-YouTube-Client-Version': version,
     'X-Goog-Visitor-Id': visitor,
   });
   const status = player.playabilityStatus || {};
-  if (status.status && status.status !== 'OK') throw new Error('视频不可播放：' + status.status);
+  if (status.status && status.status !== 'OK') throw new Error('视频不可播放：' + status.status + (status.reason ? ' / ' + status.reason : ''));
   const tracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
   if (!tracks.length) return { id, ts: new Date().toISOString(), language: '', segments: [], error: 'no_captions' };
   const track = tracks.find(x => x.languageCode === 'en') || tracks[0];
@@ -119,7 +126,7 @@ async function watchTranscript(id) {
   const html = await r.text();
   const player = extractPlayerResponse(html);
   const status = player.playabilityStatus || {};
-  if (status.status && status.status !== 'OK') throw new Error('视频不可播放：' + status.status);
+  if (status.status && status.status !== 'OK') throw new Error('视频不可播放：' + status.status + (status.reason ? ' / ' + status.reason : ''));
   const tracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
   if (!tracks.length) return { id, ts: new Date().toISOString(), language: '', segments: [], error: 'no_captions' };
   const track = tracks.find(x => x.languageCode === 'en') || tracks[0];
@@ -131,10 +138,14 @@ async function watchTranscript(id) {
   return { id, ts: new Date().toISOString(), language: track.languageCode || '', segments };
 }
 async function fetchTranscript(id) {
-  try { return await androidTranscript(id); }
+  try { return await mobileTranscript(id, false); }
   catch (error) {
-    console.error('Innertube失败', id, error.message);
-    return watchTranscript(id);
+    console.error('Android失败', id, error.message);
+    try { return await mobileTranscript(id, true); }
+    catch (iosError) {
+      console.error('iOS失败', id, iosError.message);
+      return watchTranscript(id);
+    }
   }
 }
 
